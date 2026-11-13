@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Laufzeit-Konfiguration des Wrappers. Wird von Generator.php befuellt; alle
+  Werte sind dort bereits fuer Android-String-Ressourcen und XML maskiert.
+  formatted="false": Prozentzeichen in URLs (%20 ...) sind keine Format-Platzhalter.
+-->
+<resources>
+    <string name="wrapper_url" translatable="false" formatted="false">{{WEBSITE_URL}}</string>
+    <string name="wrapper_display_mode" translatable="false">{{FULLSCREEN_MODE}}</string>
+    <!-- "url" = Website aus dem Internet laden (Variante 1),
+         "local" = mitgelieferte Dateien aus assets/www (Variante 2) -->
+    <string name="wrapper_source" translatable="false">{{SOURCE_MODE}}</string>
+</resources>

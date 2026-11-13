@@ -1,0 +1,74 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace '{{PACKAGE_NAME}}'
+    compileSdk {{COMPILE_SDK}}
+
+    defaultConfig {
+        applicationId '{{PACKAGE_NAME}}'
+        minSdk {{MIN_SDK}}
+        targetSdk {{TARGET_SDK}}
+        versionCode {{VERSION_CODE}}
+        versionName '{{VERSION_NAME}}'
+
+        // WICHTIG: Nutzerwerte (URL, App-Name, ...) stehen bewusst NICHT hier,
+        // sondern maskiert in res/values/wrapper_config.xml bzw. strings.xml.
+        // Diese Datei wird als Groovy-Code ausgefuehrt - eine ungenuegend
+        // maskierte Eingabe koennte sonst Code auf dem Build-Server ausfuehren.
+    }
+
+    signingConfigs {
+        release {
+            // Die Zugangsdaten werden vom GitHub-Workflow ausschliesslich
+            // ueber Umgebungsvariablen an den Gradle-Prozess uebergeben -
+            // so landen sie nie im Klartext in einer Projektdatei oder in
+            // der Prozessliste (ps aux).
+            def ksPath = System.getenv('RELEASE_KEYSTORE_PATH')
+            if (ksPath == null) {
+                throw new GradleException('RELEASE_KEYSTORE_PATH ist nicht gesetzt - unsignierte Builds sind nicht erlaubt.')
+            }
+            if (ksPath != null) {
+                storeFile file(ksPath)
+                storePassword System.getenv('RELEASE_STORE_PASSWORD')
+                keyAlias System.getenv('RELEASE_KEY_ALIAS')
+                keyPassword System.getenv('RELEASE_KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            debuggable false
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    buildFeatures {
+        buildConfig false
+        viewBinding false
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.13.1'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.core:core-splashscreen:1.0.1'
+    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+    implementation 'androidx.webkit:webkit:1.11.0'
+    implementation 'com.google.android.material:material:1.12.0'
+}

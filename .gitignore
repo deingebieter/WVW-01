@@ -1,0 +1,8 @@
+# Signaturschluessel gehoeren in die GitHub-Secrets, nie ins Repository
+*.jks
+*.keystore
+*.apk
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

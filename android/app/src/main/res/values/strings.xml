@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">{{APP_NAME}}</string>
+    <string name="offline_message">Keine Internetverbindung.\nTippen, um es erneut zu versuchen.</string>
+    <string name="download_started">Download gestartet</string>
+    <string name="download_failed">Download nicht möglich</string>
+    <string name="no_app_found">Keine passende App gefunden</string>
+</resources>

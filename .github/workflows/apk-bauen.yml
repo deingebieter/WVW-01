@@ -1,0 +1,169 @@
+name: APK bauen
+
+# Start von Hand: Tab "Actions" -> "APK bauen" -> "Run workflow".
+on:
+  workflow_dispatch:
+    inputs:
+      quelle:
+        description: "Was zeigt die App? url = Website laden (Variante 1), ordner = Dateien aus web/ (Variante 2)"
+        type: choice
+        options: [url, ordner]
+        default: url
+      url:
+        description: "Website-Adresse (nur bei url), z. B. https://beispiel.de"
+        type: string
+        required: false
+      app_name:
+        description: "App-Name (max. 30 Zeichen)"
+        type: string
+        required: true
+      package_name:
+        description: "Package-Name, z. B. de.beispiel.app (leer = automatisch)"
+        type: string
+        required: false
+      anzeige:
+        description: "standalone = Statusleiste sichtbar, immersive = echtes Vollbild"
+        type: choice
+        options: [standalone, immersive]
+        default: standalone
+      farbe:
+        description: "Theme-Farbe als #RRGGBB"
+        type: string
+        default: "#3C507D"
+      icon:
+        description: "Optional: Pfad zu PNG/JPG im Repo, z. B. icons/logo.png"
+        type: string
+        required: false
+      release:
+        description: "APK als Release veröffentlichen (direkter Download, auch am Handy)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write   # nur fuer das Release noetig
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: gd, mbstring, iconv
+          coverage: none
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      # Eingaben nur per Umgebungsvariable weitergeben - nie direkt in den
+      # Befehl einsetzen (sonst koennte ein Eingabefeld Shell-Code ausfuehren).
+      - name: Android-Projekt erzeugen
+        id: gen
+        env:
+          IN_QUELLE: ${{ inputs.quelle }}
+          IN_URL: ${{ inputs.url }}
+          IN_APP_NAME: ${{ inputs.app_name }}
+          IN_PACKAGE_NAME: ${{ inputs.package_name }}
+          IN_ANZEIGE: ${{ inputs.anzeige }}
+          IN_FARBE: ${{ inputs.farbe }}
+          IN_ICON: ${{ inputs.icon }}
+          IN_VERSION_CODE: ${{ github.run_number }}
+        run: php tools/generate.php "$RUNNER_TEMP/projekt"
+
+      # Fester Schluessel aus den Repository-Secrets, falls hinterlegt
+      # (dann lassen sich neue Builds als Update installieren). Sonst wird
+      # wie im Original ein frischer Einmal-Schluessel erzeugt.
+      - name: Signaturschluessel vorbereiten
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/signing"
+          mkdir -m 700 -p "$dir"
+          ks="$dir/release.jks"
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$ks"
+            pass="$KEYSTORE_PASSWORD"
+            alias="${KEY_ALIAS:-app}"
+            echo "Fester Signaturschluessel aus den Secrets wird verwendet."
+          else
+            pass="$(openssl rand -hex 24)"
+            echo "::add-mask::$pass"
+            alias="app"
+            RELEASE_STORE_PASSWORD="$pass" keytool -genkeypair -noprompt \
+              -keystore "$ks" -storetype PKCS12 \
+              -storepass:env RELEASE_STORE_PASSWORD -keypass:env RELEASE_STORE_PASSWORD \
+              -alias "$alias" -keyalg RSA -keysize 4096 -validity 10000 \
+              -dname "CN=Generated App, OU=Build, O=WebView Wrapper, C=DE"
+            echo "::warning::Kein fester Signaturschluessel hinterlegt: Diese APK laesst sich nicht als Update ueber eine aeltere Version installieren (vorher deinstallieren)."
+          fi
+          {
+            echo "RELEASE_KEYSTORE_PATH=$ks"
+            echo "RELEASE_STORE_PASSWORD=$pass"
+            echo "RELEASE_KEY_PASSWORD=$pass"
+            echo "RELEASE_KEY_ALIAS=$alias"
+          } >> "$GITHUB_ENV"
+
+      - name: APK bauen (Gradle)
+        run: gradle --project-dir "$RUNNER_TEMP/projekt" assembleRelease --no-daemon --console=plain --warning-mode=summary
+
+      - name: APK pruefen
+        id: apk
+        env:
+          PKG: ${{ steps.gen.outputs.package_name }}
+          VERSION: ${{ steps.gen.outputs.version_name }}
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/projekt/app/build/outputs/apk/release/app-release.apk"
+          tools="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          "$tools/apksigner" verify --print-certs "$src"
+          mkdir -p "$RUNNER_TEMP/out"
+          out="$RUNNER_TEMP/out/${PKG}-${VERSION}.apk"
+          cp "$src" "$out"
+          echo "path=$out" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$out")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.apk.outputs.name }}
+          path: ${{ steps.apk.outputs.path }}
+          retention-days: 14
+
+      - name: Als Release veroeffentlichen
+        if: ${{ inputs.release }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_NAME: ${{ inputs.app_name }}
+          APK: ${{ steps.apk.outputs.path }}
+          TAG: apk-${{ github.run_number }}
+        run: |
+          gh release create "$TAG" "$APK" \
+            --target "$GITHUB_SHA" \
+            --title "$APP_NAME (Build ${{ github.run_number }})" \
+            --notes "APK herunterladen und auf dem Handy oeffnen."
+
+      - name: Zusammenfassung
+        if: always()
+        env:
+          APP_NAME: ${{ inputs.app_name }}
+          PKG: ${{ steps.gen.outputs.package_name }}
+          NAME: ${{ steps.apk.outputs.name }}
+        run: |
+          {
+            echo "### $APP_NAME"
+            echo "- Package: \`$PKG\`"
+            echo "- Datei: \`$NAME\`"
+            echo "- Download: unten unter **Artifacts** oder (falls aktiviert) unter **Releases**"
+          } >> "$GITHUB_STEP_SUMMARY"
